@@ -20,11 +20,18 @@ var (
 	timeoutSec   = flag.Int("timeout-sec", 3, "request timeout time in seconds")
 	https        = flag.Bool("https", false, "whether backends support HTTPs")
 	traceEnabled = flag.Bool("trace", false, "whether to include tracing information into responses")
+)
 
-	timeout        time.Duration
-	serversPool    = []string{"server1:8080", "server2:8080", "server3:8080"}
-	healthyMu      sync.RWMutex
+var (
+	timeout     = time.Duration(*timeoutSec) * time.Second
+	serversPool = []string{
+		"server1:8080",
+		"server2:8080",
+		"server3:8080",
+	}
+
 	healthyServers []string
+	healthyMu      sync.RWMutex
 )
 
 func scheme() string {
@@ -37,6 +44,7 @@ func scheme() string {
 func health(dst string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
 	req, _ := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s://%s/health", scheme(), dst), nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -50,17 +58,18 @@ func updateHealthLoop() {
 		s := server
 		go func() {
 			for range time.Tick(5 * time.Second) {
-				if health(s) {
-					healthyMu.Lock()
+				isHealthy := health(s)
+				log.Println(s, "healthy:", isHealthy)
+
+				healthyMu.Lock()
+				if isHealthy {
 					if !contains(healthyServers, s) {
 						healthyServers = append(healthyServers, s)
 					}
-					healthyMu.Unlock()
 				} else {
-					healthyMu.Lock()
 					healthyServers = remove(healthyServers, s)
-					healthyMu.Unlock()
 				}
+				healthyMu.Unlock()
 			}
 		}()
 	}
@@ -111,7 +120,7 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 
 	resp, err := http.DefaultClient.Do(fwdRequest)
 	if err != nil {
-		log.Printf("Forward error: %v", err)
+		log.Printf("Failed to get response from %s: %s", dst, err)
 		rw.WriteHeader(http.StatusServiceUnavailable)
 		return err
 	}
@@ -127,9 +136,13 @@ func forward(dst string, rw http.ResponseWriter, r *http.Request) error {
 		rw.Header().Set("lb-from", dst)
 	}
 
+	log.Println("fwd", resp.StatusCode, resp.Request.URL)
 	rw.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(rw, resp.Body)
-	return err
+	if err != nil {
+		log.Printf("Failed to write response: %s", err)
+	}
+	return nil
 }
 
 func main() {
@@ -138,7 +151,7 @@ func main() {
 
 	updateHealthLoop()
 
-	server := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		dst, err := selectServer(r.RemoteAddr)
 		if err != nil {
 			http.Error(rw, "No healthy servers available", http.StatusServiceUnavailable)
@@ -149,6 +162,6 @@ func main() {
 
 	log.Println("Starting load balancer...")
 	log.Printf("Tracing support enabled: %t", *traceEnabled)
-	server.Start()
+	frontend.Start()
 	signal.WaitForTerminationSignal()
 }
