@@ -152,7 +152,12 @@ func main() {
 	updateHealthLoop()
 
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		dst, err := selectServer(r.RemoteAddr)
+		remoteAddr := r.Header.Get("X-Test-Client")
+		if remoteAddr == "" {
+			remoteAddr = r.RemoteAddr
+		}
+
+		dst, err := selectServer(remoteAddr)
 		if err != nil {
 			http.Error(rw, "No healthy servers available", http.StatusServiceUnavailable)
 			return

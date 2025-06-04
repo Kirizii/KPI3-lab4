@@ -24,7 +24,10 @@ func TestBalancer(t *testing.T) {
 	serverSet := make(map[string]bool)
 
 	for i := 0; i < 10; i++ {
-		resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data", baseAddress))
+		req, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/v1/some-data", baseAddress), nil)
+		req.Header.Set("X-Test-Client", "client-123") // стабільна ідентичність
+
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Errorf("request failed: %s", err)
 			continue
