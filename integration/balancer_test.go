@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 const baseAddress = "http://balancer:8090"
@@ -19,14 +21,36 @@ func TestBalancer(t *testing.T) {
 		t.Skip("Integration test is not enabled")
 	}
 
-	// TODO: Реалізуйте інтеграційний тест для балансувальникка.
-	resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data", baseAddress))
-	if err != nil {
-		t.Error(err)
+	serverSet := make(map[string]bool)
+
+	for i := 0; i < 10; i++ {
+		resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data", baseAddress))
+		if err != nil {
+			t.Errorf("request failed: %s", err)
+			continue
+		}
+		from := resp.Header.Get("lb-from")
+		t.Logf("response from [%s]", from)
+		serverSet[from] = true
+		_ = resp.Body.Close()
 	}
-	t.Logf("response from [%s]", resp.Header.Get("lb-from"))
+
+	// Перевірка: всі відповіді мають бути від одного і того ж сервера
+	assert.Equal(t, 1, len(serverSet), "Expected all responses from the same server")
 }
 
 func BenchmarkBalancer(b *testing.B) {
-	// TODO: Реалізуйте інтеграційний бенчмарк для балансувальникка.
+	if _, exists := os.LookupEnv("INTEGRATION_TEST"); !exists {
+		b.Skip("Integration benchmark is not enabled")
+	}
+
+	for i := 0; i < b.N; i++ {
+		resp, err := client.Get(fmt.Sprintf("%s/api/v1/some-data", baseAddress))
+		if err != nil {
+			b.Errorf("request failed: %s", err)
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}
 }
